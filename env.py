@@ -15,8 +15,9 @@ from copy import deepcopy
 JOINT_NAMES = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
                'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
 DURATION = 0.01
-GOAL = [-0.03,0.90,1.05,-1.57,1.57,0]
-INIT = [-1.02, -2.44, 2.44, 3.13, -0.55, 0.0]
+GOAL = [0.525000, 0.00, 0.854007, 0.00, 0.00, 0.00]
+###Initial Home position of Ur5 Arm
+INIT = [0.0, -1.571, 1.571, -1.571, 0.0, 0.0]
 
 
 class Ur5():
@@ -238,8 +239,10 @@ class Ur5():
                 reel_name = "reel_%d_%d" % (row,col)
                 delete_model(reel_name)
                 pose = deepcopy(origin_pose)
-                pose.position.x = origin_pose.position.x - 6.28
-                pose.position.y = origin_pose.position.y + 2.81
+                pose.position.x = origin_pose.position.x + 0.02
+                if pose.position.x > 3:
+                  pose.position.x = 0.506
+                pose.position.y = origin_pose.position.y + 0
                 pose.position.z = origin_pose.position.z + 0
                 s(reel_name, reel_xml, "", pose, "world")
                 # print("spawnobj")
