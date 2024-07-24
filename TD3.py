@@ -5,21 +5,6 @@ import torch.nn.functional as F
 import numpy as np
 import os
 import matplotlib.pyplot as plt
-import numpy as np
-import rospy
-import actionlib
-import time
-from control_msgs.msg import *
-from trajectory_msgs.msg import *
-from sensor_msgs.msg import JointState
-from tf import TransformListener
-from math import pi
-from tf.transformations import quaternion_from_euler, euler_from_quaternion
-import sys, tf
-from gazebo_msgs.srv import *
-from geometry_msgs.msg import *
-from copy import deepcopy
-
 
 ###############################  TD3  ####################################
 def fanin_init(size, fanin=None):
@@ -79,8 +64,7 @@ class Critic(nn.Module):
         self.forward5 = nn.Linear(400, 300)
         self.forward6 = nn.Linear(300, 1)
         self.Relu = nn.ReLU()
-    #### x1 is the first critic vvalue
-    #### x2 is the second critic value
+        
     def forward(self, x, a):
         x1 = self.forward1(torch.cat([x,a],1))
         x1 = self.Relu(x1)
@@ -95,7 +79,7 @@ class Critic(nn.Module):
         x2 = self.forward3(x2)
 
         return x1, x2
-    ###getting the value for only first critic value
+
     def Q1(self, x, a):
         x1 = self.forward1(torch.cat([x,a],1))
         x1 = self.Relu(x1)
@@ -142,19 +126,11 @@ class TD3(object):
         self.noise_target = OrnsteinUhlenbeckActionNoise(self.a_dim,sigma=0.1)
         self.gpu = cuda
 
-        ####Initializing the Actor Network
         self.actor = Actor(s_dim, a_dim)
-
-        ###Initializing the Target ACtor Network
-        self.actor_target = Actor(s_dim, a_dim)
-
-        ###Initializing the Critic Network
+        self.actor_target = Actor(s_dim, a_dim) 
         self.critic = Critic(s_dim, a_dim)
-
-        ##Initializing the Traget Critic Network
         self.critic_target = Critic(s_dim, a_dim)
 
-        ###Optimizers for the actor and the critic network
         self.optim_a = optim.Adam(self.actor.parameters(), LR_A)
         self.optim_c = optim.Adam(self.critic.parameters(), LR_C)
     
@@ -170,26 +146,18 @@ class TD3(object):
         self.loss_actor_list = []
         self.critic1_q = []
         self.critic2_q = []
-        self.loss_critic_list = []
 
     def store_transition(self, s, a, r, s_, done):
-
-        ##horizontally stacking the transitions in replay buffer
         transition = np.hstack((s, a, [r], s_, [done]))
         index = self.memory_counter % self.memory_size  # replace the old memory with new memory
         self.memory[index, :] = transition
         self.memory_counter += 1
-
-    #### choose_action helps in selection of ACtion from a certain state using Actor Network
-    ### with exploration Noise
+    
     def choose_action(self, state, noise=True):
         state = torch.from_numpy(state).float()
         state = state.view(1,-1)
         if self.gpu:
             state = state.to(self.cuda)
-
-            ### Perform the action and receive the action by using the
-            #### actor network
             action = self.actor(state).flatten()
             action = action.cpu().detach().numpy()
             if noise:
@@ -225,15 +193,11 @@ class TD3(object):
             sample_index = np.random.choice(self.memory_size, size=self.batch_size)
         else:
             sample_index = np.random.choice(self.memory_counter, size=self.batch_size)
-
-        ##### sampling a mini-batch of 'sample_index' number of terms
         batch_memory = self.memory[sample_index, :]
         batch_memory = torch.from_numpy(batch_memory).float()
         if self.gpu:
             batch_memory = batch_memory.to(self.cuda)
 
-        ### retrieving current states 's', new state 's'', present action 'a',
-        #### current rewrad 'r' and distances 'd'
         s = batch_memory[:, :self.s_dim]
         s_ = batch_memory[:, -self.s_dim-1:-1]
         a = batch_memory[:, self.s_dim:self.s_dim + self.a_dim]
@@ -242,17 +206,15 @@ class TD3(object):
 		# ---------------------- optimize critic ----------------------
 		# Use target actor exploitation policy here for loss evaluation
 
-        
+        # 获取s_的设备位置
         device = s_.device
 
-        
+        # 添加噪声并确保噪声张量在正确的设备上
         noise_tensor = torch.from_numpy(self.noise_target.sample()).float().to(device)
         noise_clamped = torch.clamp(noise_tensor, min=-self.noise_clip, max=self.noise_clip)
-
-        ### chossing the action perfromed by the target actor network
         a_ = self.actor_target(s_) + noise_clamped
 
-        
+        # 对a_进行clamp操作并detach
         a_ = torch.clamp(a_, min=-1, max=1).detach()
 
         # a_ = self.actor_target(s_) + torch.clamp(torch.from_numpy(self.noise_target.sample()).float(),
@@ -261,8 +223,6 @@ class TD3(object):
 
 
         #a_ = self.actor_target(s_)
-
-        ##retreiving values 'q1' and 'q2' from the target criric network
         q1, q2 = self.critic_target(s_, a_)
         q_ = torch.min(q1,q2)
 		# y_exp = r + gamma*Q'( s2, pi'(s2))
@@ -271,11 +231,6 @@ class TD3(object):
         y_predicted1, y_predicted2 = self.critic(s, a)
 		# compute critic loss, and update the critic
         loss_critic = F.mse_loss(y_predicted1, y_expected) + F.mse_loss(y_predicted2, y_expected)
-
-        #temp_critic = loss_critic
-        
-        self.loss_critic_list.append(loss_critic)
-        
         self.optim_c.zero_grad()
         loss_critic.backward()
         self.optim_c.step()
@@ -287,15 +242,10 @@ class TD3(object):
         if self.memory_counter % self.policy_delay == 0:
             pred_a = self.actor(s)
             loss_actor = -self.critic.Q1(s, pred_a).mean()
-
-            #temp_actor = loss_actor
-            
-            self.loss_actor_list.append(loss_actor)
-            
             self.optim_a.zero_grad()
             loss_actor.backward()
             self.optim_a.step()
-            #self.loss_actor_list.append(loss_actor)
+            self.loss_actor_list.append(loss_actor)
 
             # ------------------ update target network ------------------
             self.soft_update(self.actor_target, self.actor, self.tau)
@@ -315,51 +265,26 @@ class TD3(object):
         self.optim_a.load_state_dict(torch.load(model_dir+model_name+'optim_a.pth'))
         self.optim_c.load_state_dict(torch.load(model_dir+model_name+'optim_c.pth'))
 
-    def plot_loss(self,model_dir,model_name, epoch):
-    
-        loss_actor_tensor = torch.tensor(self.loss_actor_list[-200:])
-        loss_actor_numpy = loss_actor_tensor.detach().numpy()
-        
-        loss_critic1q_tensor = torch.tensor(self.critic1_q[-200:])
-        loss_critic1q_numpy = loss_critic1q_tensor.detach().numpy()
-        
-        loss_critic2q_tensor = torch.tensor(self.critic2_q[-200:])
-        loss_critic2q_numpy = loss_critic2q_tensor.detach().numpy()
-        
-        loss_critc_tensor = torch.tensor(self.loss_critic_list[-200:])
-        loss_critc_numpy = loss_critc_tensor.detach().numpy()
-         
+    def plot_loss(self,model_dir,model_name):
         plt.figure()
-        #plt.plot(np.arange(len(self.loss_actor_list)),self.loss_actor_list )
-        plt.plot(np.arange(len(loss_actor_numpy)), loss_actor_numpy, color='blue')
-        plt.title(f'Actor_Loss_(Epoch {epoch + 1})')
+        plt.plot(np.arange(len(self.loss_actor_list)),self.loss_actor_list )
         plt.ylabel('Loss_Actor')
         plt.xlabel('training step')
-        plt.savefig(model_dir+model_name+f'loss_actor_epoch_{epoch+1}.png')
+        plt.savefig(model_dir+model_name+'loss_actor.png')
         plt.close()
 
         plt.figure()
-        plt.plot(np.arange(len(loss_critic1q_numpy)),loss_critic1q_numpy, color='yellow')
-        plt.title(f'Critic_1_Qvalue_(Epoch {epoch + 1})')
+        plt.plot(np.arange(len(self.critic1_q)),self.critic1_q)
         plt.ylabel('Q value')
         plt.xlabel('training step')
-        plt.savefig(model_dir+model_name+f'Q_critic1_epoch_{epoch+1}.png')
+        plt.savefig(model_dir+model_name+'Q_critic1.png')
         plt.close()
 
         plt.figure()
-        plt.plot(np.arange(len(loss_critic2q_numpy)),loss_critic2q_numpy, color='violet')
-        plt.title(f'Critic_2_Qvalue_(Epoch {epoch + 1})')
+        plt.plot(np.arange(len(self.critic2_q)),self.critic2_q)
         plt.ylabel('Q value')
         plt.xlabel('training step')
-        plt.savefig(model_dir+model_name+f'Q_critic2_epoch_{epoch+1}.png')
-        plt.close()
-        
-        
-        plt.plot(np.arange(len(loss_critc_numpy)), loss_critc_numpy, color='orange')
-        plt.title(f'Critic_Loss_(Epoch {epoch + 1})')
-        plt.ylabel('Loss_Critic')
-        plt.xlabel('training step')
-        plt.savefig(model_dir+model_name+f'loss_critc_epoch_{epoch+1}.png')
+        plt.savefig(model_dir+model_name+'Q_critic2.png')
         plt.close()
 
     def mode(self, mode='train'):

@@ -15,10 +15,8 @@ from copy import deepcopy
 JOINT_NAMES = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
                'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
 DURATION = 0.01
-GOAL = [0.525000, 0.00, 0.854007, 0.00, 0.00, 0.00]
-###Initial Home position of Ur5 Arm
-INIT = [0.0, -1.571, 1.571, -1.571, 0.0, 0.0]
-
+GOAL = [0.525, 0.0, 0.904,-1.57,1.57,0]
+INIT = [0.0, -1.92, 2.0, -1.68, -1.56, 0.0]
 
 class Ur5():
     get_counter = 0
@@ -44,18 +42,13 @@ class Ur5():
         self.tf = TransformListener()                            
         self.goal_pose = np.array(goal_pose)
         self.base_pos = self.get_pos(link_name='base_link')
-        
         self.duration = duration
-        self.state_dim = 11
+        self.state_dim = 10
         self.action_dim = 5
         self.target_generate()
     
     def step(self,action):
         #Execute action 
-
-        self.client.cancel_all_goals()
-
-        
         goal = FollowJointTrajectoryGoal()
         goal.trajectory = JointTrajectory()
         goal.trajectory.joint_names = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
@@ -79,121 +72,76 @@ class Ur5():
 
         goal.trajectory.points = [JointTrajectoryPoint(positions=action_sent, velocities=[0]*6, 
                                                                     time_from_start=rospy.Duration(self.duration))]
-        
-        # np.savetxt('joint_angles.txt',goal,fmt='%d')
         self.client.send_goal(goal)
         self.client.wait_for_result()
-        position, rpy = self.get_pos(link_name='ee_link')
+        position, rpy = self.get_pos(link_name='gripper_tool0')
 
-        state = self.get_state(action,position, rpy)
-        reward, terminal, target_pos, end_eff_pos = self.get_reward(position,rpy)
+        state = self.get_state(action,position)
+        reward, terminal = self.get_reward(position,rpy,action)
 
-        return state, reward, terminal, target_pos, end_eff_pos
+        return state, reward, terminal
 
     def reset(self):
-        
-        ###First Cancelling all the goals
-        self.client.cancel_all_goals()
-
         self.current_joints = INIT
         self.client.send_goal(self.initial)
         self.client.wait_for_result()
         self.target_generate()
-        position, rpy = self.get_pos(link_name='ee_link')
+        position = self.get_pos(link_name='gripper_tool0')[0]
 
-        #print(position)
-        #print("*******")
-        #print(rpy)
+        return self.get_state([0,0,0,0,0],position)
+        #return np.array(position)
 
-        state_obtained = self.get_state([0,0,0,0,0],position, rpy)
-
-        return state_obtained
-
-    def get_state(self,action, position,rpy):
-        #x, y, z of angular distance
+    def get_state(self,action,position):
+        #x, y, z of goal
         goal_pose = self.goal_pose[:3]
-
-        #x,y, z of angualr orientation
-        goal_orient = self.goal_pose[3:]
-
-        #print("Shape of rpy:", np.shape(rpy))
-        
         #goal_dis = np.linalg.norm(goal_pose-self.base_pos)
-        #print(rpy[0])
-        #print(position)
-        
-        ####pose_6 estimates the angular distance between the goal pose and current positiuon
         pose_6 = position - goal_pose
-        orient_6 = rpy - goal_orient
-        ###pose_6 must be absplute value
+        dis_6 = np.linalg.norm(pose_6)
+        in_point = 1 if self.get_counter > 0 else 0
         
-
-        #dis_6 = np.linalg.norm(pose_6)
-        ###absolute value
-
-        #in_point = 1 if self.get_counter > 0 else 0
-        
-        state = np.concatenate((action, pose_6, orient_6),axis=None)
+        state = np.concatenate((pose_6,dis_6,action,in_point),axis=None)
         #state = np.concatenate((pose_6,goal_dis,action,in_point),axis=None)
         #state = state / np.linalg.norm(state)
 
         return state
-    
-    def get_reward(self,pos,rpy):
+
+    def get_reward(self,pos,rpy,action):
+        threshold = 20
         t = False
-        #Compute reward based on angular distance
+        #Compute reward based on distance
         dis = np.linalg.norm(self.goal_pose[:3]-pos)
         #add regularization term
-
-        #compute orientation distance
-        dis_a = np.linalg.norm(self.goal_pose[3:]-rpy)
+        reward = -0.1 * dis - 0.01 * np.linalg.norm(action)
+        #compute reward based on rotation
+        dis_a = np.linalg.norm(self.goal_pose[3]-rpy[0])
         # print(self.goal_pose[3])
         # print(rpy[0])
-        #r_a = -0.5 * dis_a
+        r_a = -0.5 * dis_a
 
-        reward = - dis - 0.1 * dis_a
-
-        collision_coeff = 0
-
-        ####If Collisiion occurs
-        if dis == 0.1 and dis_a == 0.1:
-            collision_coeff = 1
-            reward  = reward - collision_coeff
-
-        if self.get_counter < 200:
-            reward = reward - collision_coeff
-            if dis < 0.1:
-                reward += 1
-                print ('reach distance')
-                if dis_a < 0.1:
-                    reward += 2
-                    ####setting the flag to true
-                    ###to signify succesfully reaching the terminal
-                    t = True
-                    print ('reach rotation')
-                    print('successfully complete task')
-                    print('############################')
-        else:
-            if self.get_counter == 200:
-                ###only reaching the distance
-                if dis < 0.1:
-                    reward += 1
-                    print ('reach distance')
-                    ####Checking if the orientation is reached
-                    if dis_a < 0.1:
-                        print ('reach rotation')
-                        print('successfully complete task')
-                        print('############################')
-                        reward += 10
-                        t = True
-                else:
-                    reward += 0
-
-        self.get_counter += 1
+        #print(dis)
+        #print(dis_a)
         
-        return reward, t, self.goal_pose[3:], pos
+        if dis < 0.1:
+            reward += 1 + r_a
+            print ('reach distance')
+            #print(reward)
+            if dis_a < 0.1:
+                reward += 2
+                print ('reach rotation')
+                self.get_counter += 1
+            else:
+                self.get_counter = 0
+
+            if self.get_counter > threshold:
+                reward += 10 
+                t = True
+                self.get_counter = 0
+                print ('successfully complete task')
+                print ('############################')
+        
+        return reward, t
     
-    def get_pos(self,link_name='ee_link',ref_link='world'):
+    def get_pos(self,link_name='gripper_tool0',ref_link='world'):
         position = None
         while position is None:
             try:
@@ -217,44 +165,27 @@ class Ur5():
         
         orient = Quaternion(*tf.transformations.quaternion_from_euler(1.571, 0, 0))
         origin_pose = Pose(Point(goal[0],goal[1],goal[2]), orient)
-        
-        #with open('/home/robocupathome/arkaur5_ws/src/contexualaffordance/models/models/table/model.sdf', "r") as f:
-             #table_xml = f.read()
 
-        #table_name = "table"
-        #table_pose = Pose(Point(goal[0],goal[1],goal[2]), orient)  # Define the desired position and orientation for the block
-        #print(table_xml)
-        #print(table_pose)
-        #delete_model(table_name)
-        #s(table_name, table_xml, "", table_pose, "world")
-        
-        
-
-
-        with open('/home/robocupathome/arkaur5_ws/src/contexualaffordance/models/box_red/model.sdf',"r") as f:
+        with open('/home/zhitao/diskE/Project/homework4_summation/hw8_drl_ws/src/box_red/model.sdf',"r") as f:
             reel_xml = f.read()
         
         for row in [1]:
-            for col in range(1):
+            for	col in range(1):
                 reel_name = "reel_%d_%d" % (row,col)
                 delete_model(reel_name)
                 pose = deepcopy(origin_pose)
-                pose.position.x = origin_pose.position.x + 0.02
-                if pose.position.x > 3:
-                  pose.position.x = 0.506
-                pose.position.y = origin_pose.position.y + 0
-                pose.position.z = origin_pose.position.z + 0
+                pose.position.x = origin_pose.position.x #- 3.5 * unit + col * unit
+                pose.position.y = origin_pose.position.y #- 3.5 * unit + row * unit
+                pose.position.z = origin_pose.position.z
                 s(reel_name, reel_xml, "", pose, "world")
                 # print("spawnobj")
         
     def target_generate(self):
-        rand_x, rand_y, rand_z= np.random.uniform(-0.10,0.10), np.random.uniform(-0.3,0.1), np.random.uniform(-0.6,0)
-
-        # get_target_pose
+        rand_x, rand_y, rand_z= np.random.uniform(-0.3,0.1), np.random.uniform(-0.3,0.1), np.random.uniform(-0.6,0)
         self.goal_pose = np.array(GOAL)
-        self.goal_pose[0] += rand_x
-        self.goal_pose[1] += 0
-        self.goal_pose[2] += 0
+        self.goal_pose[0] += rand_x*0
+        self.goal_pose[1] += rand_y*0
+        self.goal_pose[2] += rand_z*0
         self.target_vis(self.goal_pose)
 
     def uniform_exploration(self, action):
