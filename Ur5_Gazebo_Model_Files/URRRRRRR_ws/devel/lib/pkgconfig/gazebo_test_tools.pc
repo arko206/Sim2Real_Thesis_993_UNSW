@@ -1,0 +1,8 @@
+prefix=/home/robocupathome/URRRRRRR_ws/devel
+
+Name: gazebo_test_tools
+Description: Description of gazebo_test_tools
+Version: 1.0.2
+Cflags: -I/home/robocupathome/URRRRRRR_ws/devel/include -I/home/robocupathome/URRRRRRR_ws/src/ur5-gazebo-grasping/ur5-gazebo-grasping/gazebo-pkgs/gazebo_test_tools/include
+Libs: -L${prefix}/lib -lgazebo_test_tools
+Requires: object_msgs gazebo_ros geometry_msgs roscpp std_msgs message_runtime gazebo_ros

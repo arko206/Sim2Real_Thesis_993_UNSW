@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<launch>
+
+      <node name="ur_desk" pkg="gazebo_ros" type="spawn_model"
+        args="-file /home/robocupathome/URRRRRRR_ws/src/ur5-gazebo-grasping/ur5-gazebo-grasping/ur5_single_arm_tufts/models/ur_desk/model.sdf -sdf -model ur_desk -x 0.506 -y 0.0 -z 0.80" />
+        
+
+</launch>

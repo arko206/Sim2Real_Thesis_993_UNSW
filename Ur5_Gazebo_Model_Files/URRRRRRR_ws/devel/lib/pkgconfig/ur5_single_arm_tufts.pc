@@ -1,0 +1,8 @@
+prefix=/home/robocupathome/URRRRRRR_ws/devel
+
+Name: ur5_single_arm_tufts
+Description: Description of ur5_single_arm_tufts
+Version: 0.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 
