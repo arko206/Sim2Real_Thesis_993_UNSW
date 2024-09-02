@@ -19,8 +19,13 @@ from sensor_msgs.msg import JointState
 JOINT_NAMES = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
                'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
 DURATION = 0.01
+
+####Goal is the position of the cube in Gazebo,
+####x,y,z position of cube; r,p,y oreintation of cube
 GOAL = [0.525000,0.00,0.854007,0.00,0.00,0.00]
-#INIT = [-1.02, -2.44, 2.44, 3.13, -0.55, 0.0]
+
+### INIT refers to the initial joint angles of the arm
+### 6 joints are given initial angles
 INIT = [0.0, -1.571, 1.571, -1.571, 0.0, 0.0]
 
 class Ur5():
@@ -58,7 +63,8 @@ class Ur5():
     
     
     
-
+    ### Step function in responsible for moving the arm
+    ### according to the predicted joint angles from the actor network
     def step(self,action, object_position):
         #Execute action 
 
@@ -70,7 +76,10 @@ class Ur5():
         goal.trajectory.joint_names = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
                'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
         #set action joint limit
-        #action_ = np.concatenate((action,0),axis=None)
+        #action consists of the predicted joint angles
+
+        #### Current joint values has been added to predicted angles, to
+        #### have higher range of movements
         self.current_joints += action
         action_sent = np.zeros(6)
         #adjust joints degree  which has bound [-pi,pi]
@@ -82,37 +91,19 @@ class Ur5():
                 action_sent[i] = self.current_joints[i] % np.pi
             else:
                 action_sent[i] = self.current_joints[i]
-        # action_sent[2] = 0.9 * action_sent[2]
-        # action_sent[3] = 0.5 * (action_sent[3] - np.pi)
-        # action_sent[4] = 0.7 * action_sent[4]
-        #action_sent[1] = 1.5 * action_sent[2]
-        #action_sent[2] = 1.5 * action_sent[2]
-        #action_sent[3] = 2.5 * (action_sent[3] - np.pi)
-        #action_sent[4] = 0.7 * action_sent[4]
+        
 
         goal.trajectory.points = [JointTrajectoryPoint(positions=action_sent, velocities=[0]*6, 
                                                                     time_from_start=rospy.Duration(self.duration))]
         
         # np.savetxt('joint_angles.txt',goal,fmt='%d')
+
+        ###client server moves the arm according to joint angle
+        #### values form action_sent
         self.client.send_goal(goal)
         self.client.wait_for_result()
 
-        # joint_state_msg = rospy.wait_for_message('/joint_states', JointState, timeout=1.0)
-
-        # ###Recive the current joint position
-        # current_joints = joint_state_msg.position
-
-        # current_joint_angles = self.get_current_joint_angles()
-        
-        # if current_joint_angles is not None:
-        #     self.current_joints = current_joint_angles
-        # else:
-        #     rospy.logwarn("Failed to get current joint angles, using last known values")
-
-        # Receive the current joint positions
-
-        # Check the result and print error messages if necessary
-
+        ###Check wrong joint trajectories, path tolerance from the server
         flag_success_reward = 0
         flag_invalid_goal = 0
         flag_invalid_joints = 0
@@ -155,7 +146,10 @@ class Ur5():
             rospy.logwarn(f"Failed to get current joint angles: {e}. Using last known values.")
 
         position, rpy = self.get_pos(link_name='ee_link')
-
+      
+        #### invalid joints flag and goal tolerance has been added to state argument, in order to mark these trajectories
+        #### to be invalid and violation of goal positions to ensure proper learning
+      
         state = self.get_state(action, position, object_position, flag_invalid_joints, flag_goal_tolerance_violation)
 
         reward, terminal, target_pos, end_eff_pos = self.get_reward(object_position,position, flag_path_tolerance_violation, flag_goal_tolerance_violation, flag_invalid_goal)
